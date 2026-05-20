@@ -6,6 +6,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -29,15 +30,20 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
     public PaperOrFoliaSchedulerAdapter(JavaPlugin plugin, PlatformCapabilities capabilities) throws ReflectiveOperationException {
         this.plugin = plugin;
         this.capabilities = capabilities;
-        this.globalScheduler = Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
-        this.regionScheduler = Bukkit.class.getMethod("getRegionScheduler").invoke(null);
-        this.asyncScheduler = Bukkit.class.getMethod("getAsyncScheduler").invoke(null);
-        this.globalExecute = globalScheduler.getClass().getMethod("execute", Plugin.class, Runnable.class);
-        this.globalCancelTasks = globalScheduler.getClass().getMethod("cancelTasks", Plugin.class);
-        this.regionExecute = regionScheduler.getClass().getMethod("execute", Plugin.class, Location.class, Runnable.class);
-        this.asyncRunNow = asyncScheduler.getClass().getMethod("runNow", Plugin.class, Consumer.class);
-        this.asyncCancelTasks = asyncScheduler.getClass().getMethod("cancelTasks", Plugin.class);
-        this.entityGetScheduler = Entity.class.getMethod("getScheduler");
+        this.globalScheduler = invokeStatic(Bukkit.class.getMethod("getGlobalRegionScheduler"));
+        this.regionScheduler = invokeStatic(Bukkit.class.getMethod("getRegionScheduler"));
+        this.asyncScheduler = invokeStatic(Bukkit.class.getMethod("getAsyncScheduler"));
+        this.globalExecute = publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler",
+            globalScheduler, "execute", Plugin.class, Runnable.class);
+        this.globalCancelTasks = publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler",
+            globalScheduler, "cancelTasks", Plugin.class);
+        this.regionExecute = publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.RegionScheduler",
+            regionScheduler, "execute", Plugin.class, Location.class, Runnable.class);
+        this.asyncRunNow = publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.AsyncScheduler",
+            asyncScheduler, "runNow", Plugin.class, Consumer.class);
+        this.asyncCancelTasks = publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.AsyncScheduler",
+            asyncScheduler, "cancelTasks", Plugin.class);
+        this.entityGetScheduler = accessible(Entity.class.getMethod("getScheduler"));
     }
 
     @Override
@@ -49,7 +55,7 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
     public TaskHandle runGlobal(Runnable task) {
         try {
             globalExecute.invoke(globalScheduler, plugin, guard(task));
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             plugin.getLogger().log(Level.SEVERE, "Failed to schedule global task.", ex);
         }
         return TaskHandle.NOOP;
@@ -63,7 +69,7 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
         }
         try {
             regionExecute.invoke(regionScheduler, plugin, location, guard(task));
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             plugin.getLogger().log(Level.SEVERE, "Failed to schedule region task.", ex);
         }
         return TaskHandle.NOOP;
@@ -93,7 +99,7 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
             Consumer<Object> consumer = ignored -> guard(task).run();
             Object scheduledTask = asyncRunNow.invoke(asyncScheduler, plugin, consumer);
             return new ReflectiveTaskHandle(scheduledTask);
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             plugin.getLogger().log(Level.SEVERE, "Failed to schedule async task.", ex);
             return TaskHandle.NOOP;
         }
@@ -103,22 +109,52 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
     public void cancelAll() {
         try {
             globalCancelTasks.invoke(globalScheduler, plugin);
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             plugin.getLogger().log(Level.WARNING, "Failed to cancel global tasks.", ex);
         }
         try {
             asyncCancelTasks.invoke(asyncScheduler, plugin);
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | RuntimeException ex) {
             plugin.getLogger().log(Level.WARNING, "Failed to cancel async tasks.", ex);
         }
     }
 
     private Method findEntityExecuteMethod(Class<?> schedulerClass) {
         try {
-            return schedulerClass.getMethod("execute", Plugin.class, Runnable.class, Runnable.class, long.class);
+            return publicSchedulerMethod("io.papermc.paper.threadedregions.scheduler.EntityScheduler",
+                schedulerClass, "execute", Plugin.class, Runnable.class, Runnable.class, long.class);
         } catch (NoSuchMethodException ex) {
             throw new IllegalStateException("EntityScheduler#execute method is not available.", ex);
         }
+    }
+
+    private static Object invokeStatic(Method method) throws ReflectiveOperationException {
+        accessible(method);
+        return method.invoke(null);
+    }
+
+    private static Method publicSchedulerMethod(String apiClassName, Object scheduler, String name, Class<?>... parameterTypes)
+        throws NoSuchMethodException {
+        return publicSchedulerMethod(apiClassName, scheduler.getClass(), name, parameterTypes);
+    }
+
+    private static Method publicSchedulerMethod(String apiClassName, Class<?> fallbackClass, String name, Class<?>... parameterTypes)
+        throws NoSuchMethodException {
+        try {
+            return accessible(Class.forName(apiClassName).getMethod(name, parameterTypes));
+        } catch (ClassNotFoundException | NoSuchMethodException ignored) {
+            return accessible(fallbackClass.getMethod(name, parameterTypes));
+        }
+    }
+
+    private static <T extends AccessibleObject> T accessible(T object) {
+        try {
+            object.setAccessible(true);
+        } catch (RuntimeException ignored) {
+            // Public API members do not require accessibility changes. The call
+            // is still attempted to protect against package-private impl classes.
+        }
+        return object;
     }
 
     private Runnable guard(Runnable task) {
@@ -173,7 +209,7 @@ public final class PaperOrFoliaSchedulerAdapter implements PlatformScheduler {
                 return null;
             }
             try {
-                return instance.getClass().getMethod(name);
+                return accessible(instance.getClass().getMethod(name));
             } catch (NoSuchMethodException ignored) {
                 return null;
             }

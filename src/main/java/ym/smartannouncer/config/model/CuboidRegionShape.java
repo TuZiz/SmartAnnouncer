@@ -38,6 +38,13 @@ public record CuboidRegionShape(
     }
 
     @Override
+    public boolean intersectsBlock(int blockX, int blockY, int blockZ) {
+        return blockX + 1.0D >= minX && blockX <= maxX
+            && blockY + 1.0D >= minY && blockY <= maxY
+            && blockZ + 1.0D >= minZ && blockZ <= maxZ;
+    }
+
+    @Override
     public double centerX() {
         return (minX + maxX) / 2.0D;
     }

@@ -30,11 +30,24 @@ public final class PlatformDetector {
             global && region && entity ? "Paper/Folia reflective scheduler" : "Spigot BukkitScheduler fallback"
         );
 
+        if (foliaPresent && (!global || !region || !entity || !async)) {
+            plugin.getLogger().severe("Folia was detected, but one or more Folia/Paper scheduler APIs are unavailable. "
+                + "SmartAnnouncer cannot run safely and will be disabled.");
+            plugin.getServer().getPluginManager().disablePlugin(plugin);
+            return PlatformScheduler.disabled(capabilities);
+        }
+
         if (global && region && entity) {
             try {
                 return new PaperOrFoliaSchedulerAdapter(plugin, capabilities);
             } catch (ReflectiveOperationException | RuntimeException ex) {
-                plugin.getLogger().log(Level.WARNING, "Paper/Folia scheduler reflection failed; falling back to BukkitScheduler.", ex);
+                if (foliaPresent) {
+                    plugin.getLogger().log(Level.SEVERE, "Folia scheduler reflection failed. "
+                        + "SmartAnnouncer will be disabled instead of falling back to BukkitScheduler.", ex);
+                    plugin.getServer().getPluginManager().disablePlugin(plugin);
+                    return PlatformScheduler.disabled(capabilities);
+                }
+                plugin.getLogger().log(Level.WARNING, "Paper scheduler reflection failed; using BukkitScheduler on non-Folia server.", ex);
             }
         }
         return new SpigotSchedulerAdapter(plugin, capabilities);

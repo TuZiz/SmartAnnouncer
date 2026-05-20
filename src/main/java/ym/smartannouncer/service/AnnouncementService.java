@@ -77,7 +77,7 @@ public final class AnnouncementService {
          * No Bukkit Player/World/Entity APIs are touched here.
          */
         return CompletableFuture.supplyAsync(this::loadReloadBundle, workerExecutor)
-            .thenApply(bundle -> {
+            .thenApplyAsync(bundle -> {
                 if (shuttingDown.get() || generation != reloadGeneration.get()) {
                     return false;
                 }
@@ -88,13 +88,14 @@ public final class AnnouncementService {
                 dedupeService.apply(bundle.configSnapshot().databaseSettings());
                 intervalScheduleService.reschedule(bundle.configSnapshot());
                 clockScheduleService.reschedule(bundle.configSnapshot());
+                locationAnnouncementService.rebuildIndex();
                 locationAnnouncementService.resetRuntimeState();
                 logger.info("Configuration and message snapshots applied atomically.");
                 if (!initialLoad) {
                     dispatcher.sendConfiguredMessage(requester, "service.reload-success");
                 }
                 return true;
-            })
+            }, workerExecutor)
             .exceptionally(throwable -> {
                 Throwable root = unwrap(throwable);
                 if (root instanceof ConfigLoadException) {

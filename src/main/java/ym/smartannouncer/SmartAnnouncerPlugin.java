@@ -57,7 +57,8 @@ public final class SmartAnnouncerPlugin extends JavaPlugin {
         IntervalScheduleService intervalScheduleService = new IntervalScheduleService(workerExecutor, registry, timedDispatchQueue, dispatcher, dedupeService, getLogger());
         ClockScheduleService clockScheduleService = new ClockScheduleService(workerExecutor, registry, timedDispatchQueue, dispatcher, dedupeService, getLogger());
         LocationAnnouncementService locationAnnouncementService = new LocationAnnouncementService(registry, dispatcher, getLogger());
-        FirstJoinAnnouncementService firstJoinAnnouncementService = new FirstJoinAnnouncementService(workerExecutor, registry, dispatcher, dedupeService, getLogger());
+        FirstJoinAnnouncementService firstJoinAnnouncementService = new FirstJoinAnnouncementService(
+            workerExecutor, registry, dispatcher, dedupeService, onlinePlayerTracker, getLogger());
 
         this.announcementService = new AnnouncementService(
             workerExecutor,

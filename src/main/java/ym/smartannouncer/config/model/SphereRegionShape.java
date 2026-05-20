@@ -28,4 +28,19 @@ public record SphereRegionShape(
         double dz = z - centerZ;
         return dx * dx + dy * dy + dz * dz <= radius * radius;
     }
+
+    @Override
+    public boolean intersectsBlock(int blockX, int blockY, int blockZ) {
+        double closestX = clamp(centerX, blockX, blockX + 1.0D);
+        double closestY = clamp(centerY, blockY, blockY + 1.0D);
+        double closestZ = clamp(centerZ, blockZ, blockZ + 1.0D);
+        double dx = closestX - centerX;
+        double dy = closestY - centerY;
+        double dz = closestZ - centerZ;
+        return dx * dx + dy * dy + dz * dz <= radius * radius;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
 }

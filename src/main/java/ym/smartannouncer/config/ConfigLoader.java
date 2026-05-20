@@ -3,6 +3,12 @@ package ym.smartannouncer.config;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.Node;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.ScalarNode;
+import org.yaml.snakeyaml.nodes.SequenceNode;
 import ym.smartannouncer.config.model.AnnouncementDefinition;
 import ym.smartannouncer.config.model.AnnouncementMessage;
 import ym.smartannouncer.config.model.ClockAnnouncement;
@@ -25,6 +31,7 @@ import ym.smartannouncer.util.ValidationUtil;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.DateTimeException;
@@ -72,7 +79,7 @@ public final class ConfigLoader {
         }
 
         String globalPrefix = ColorUtil.color(yaml.getString("settings.prefix", ""));
-        boolean debug = yaml.getBoolean("settings.debug", false);
+        boolean debug = yamlBool(yaml, "settings.debug", false);
         DatabaseSettings databaseSettings = parseDatabaseSettings(yaml);
         List<Map<?, ?>> rawAnnouncements = announcementsYaml.getMapList("announcements");
 
@@ -115,7 +122,7 @@ public final class ConfigLoader {
     }
 
     private DatabaseSettings parseDatabaseSettings(YamlConfiguration yaml) {
-        boolean enabled = yaml.getBoolean("database.enabled", false);
+        boolean enabled = yamlBool(yaml, "database.enabled", false);
         DatabaseType type = databaseType(yaml.getString("database.type", "mysql"));
         int defaultPort = type == DatabaseType.POSTGRESQL ? 5432 : 3306;
         return new DatabaseSettings(
@@ -186,6 +193,7 @@ public final class ConfigLoader {
     private YamlConfiguration loadYaml(Path path) {
         YamlConfiguration yaml = new YamlConfiguration();
         try {
+            validateStrictBooleanScalars(path);
             yaml.load(path.toFile());
             return yaml;
         } catch (IOException | InvalidConfigurationException ex) {
@@ -193,8 +201,41 @@ public final class ConfigLoader {
         }
     }
 
+    public static void validateStrictBooleanScalars(Path path) throws IOException {
+        try (Reader reader = Files.newBufferedReader(path)) {
+            Node root = new Yaml().compose(reader);
+            validateStrictBooleanScalars(root, "");
+        }
+    }
+
+    private static void validateStrictBooleanScalars(Node node, String path) {
+        if (node == null) {
+            return;
+        }
+        if (node instanceof MappingNode mappingNode) {
+            for (NodeTuple tuple : mappingNode.getValue()) {
+                String key = tuple.getKeyNode() instanceof ScalarNode scalarKey ? scalarKey.getValue() : "?";
+                String childPath = path.isEmpty() ? key : path + "." + key;
+                validateStrictBooleanScalars(tuple.getValueNode(), childPath);
+            }
+            return;
+        }
+        if (node instanceof SequenceNode sequenceNode) {
+            for (int index = 0; index < sequenceNode.getValue().size(); index++) {
+                validateStrictBooleanScalars(sequenceNode.getValue().get(index), path + "[" + index + "]");
+            }
+            return;
+        }
+        if (node instanceof ScalarNode scalarNode && "tag:yaml.org,2002:bool".equals(scalarNode.getTag().getValue())) {
+            String value = scalarNode.getValue();
+            if (!value.equals("true") && !value.equals("false")) {
+                throw new ConfigLoadException(path + " must be true or false.");
+            }
+        }
+    }
+
     private IntervalAnnouncement parseInterval(Map<?, ?> raw, String path, String id, String globalPrefix) {
-        boolean enabled = bool(raw, "enabled", true);
+        boolean enabled = bool(raw, "enabled", true, path);
         long intervalSeconds = intervalSeconds(raw, path);
         MessageOrder order = enumValue(raw, "order", MessageOrder.SEQUENTIAL, MessageOrder.class, path);
         List<AnnouncementMessage> messages = parseMessages(raw.get("messages"), path + ".messages");
@@ -217,7 +258,7 @@ public final class ConfigLoader {
     }
 
     private ClockAnnouncement parseClock(Map<?, ?> raw, String path, String id, String globalPrefix) {
-        boolean enabled = bool(raw, "enabled", true);
+        boolean enabled = bool(raw, "enabled", true, path);
         List<String> rawTimes = stringList(raw.get("times"));
         ValidationUtil.require(!rawTimes.isEmpty(), path + ".times must contain at least one HH:mm value.");
         List<LocalTime> times = new ArrayList<>();
@@ -232,7 +273,7 @@ public final class ConfigLoader {
     }
 
     private LocationAnnouncement parseLocation(Map<?, ?> raw, String path, String id, String globalPrefix) {
-        boolean enabled = bool(raw, "enabled", true);
+        boolean enabled = bool(raw, "enabled", true, path);
         LocationTrigger trigger = enumValue(raw, "trigger", LocationTrigger.ENTER, LocationTrigger.class, path);
         LocationTarget target = enumValue(raw, "target", LocationTarget.PLAYER, LocationTarget.class, path);
         long cooldownSeconds = nonNegativeLong(raw, "cooldown-seconds", 0L, path);
@@ -246,7 +287,7 @@ public final class ConfigLoader {
     }
 
     private FirstJoinAnnouncement parseFirstJoin(Map<?, ?> raw, String path, String id, String globalPrefix) {
-        boolean enabled = bool(raw, "enabled", true);
+        boolean enabled = bool(raw, "enabled", true, path);
         long delaySeconds = nonNegativeLong(raw, "delay-seconds", 5L, path);
         List<AnnouncementMessage> messages = parseMessages(raw.get("messages"), path + ".messages");
         Set<String> worlds = stringSet(raw.get("worlds"));
@@ -350,9 +391,48 @@ public final class ConfigLoader {
         return String.valueOf(value).trim();
     }
 
-    private boolean bool(Map<?, ?> raw, String key, boolean defaultValue) {
+    public static boolean strictYamlBool(YamlConfiguration yaml, String path, boolean defaultValue) {
+        if (!yaml.contains(path)) {
+            return defaultValue;
+        }
+        Object value = yaml.get(path);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String string) {
+            String normalized = string.trim().toLowerCase(Locale.ROOT);
+            if (normalized.equals("true")) {
+                return true;
+            }
+            if (normalized.equals("false")) {
+                return false;
+            }
+        }
+        throw new ConfigLoadException(path + " must be true or false.");
+    }
+
+    private boolean yamlBool(YamlConfiguration yaml, String path, boolean defaultValue) {
+        return strictYamlBool(yaml, path, defaultValue);
+    }
+
+    private boolean bool(Map<?, ?> raw, String key, boolean defaultValue, String path) {
         Object value = raw.get(key);
-        return value == null ? defaultValue : Boolean.parseBoolean(String.valueOf(value));
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String string) {
+            String normalized = string.trim().toLowerCase(Locale.ROOT);
+            if (normalized.equals("true")) {
+                return true;
+            }
+            if (normalized.equals("false")) {
+                return false;
+            }
+        }
+        throw new ConfigLoadException(path + "." + key + " must be true or false.");
     }
 
     private long positiveLong(Map<?, ?> raw, String key, String path) {

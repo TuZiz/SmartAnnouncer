@@ -7,6 +7,8 @@ public interface RegionShape {
 
     boolean contains(String worldName, double x, double y, double z);
 
+    boolean intersectsBlock(int blockX, int blockY, int blockZ);
+
     double centerX();
 
     double centerY();

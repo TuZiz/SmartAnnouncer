@@ -5,7 +5,12 @@ import java.time.Instant;
 public interface AnnouncementDispatchStore extends AutoCloseable {
     AnnouncementDispatchStore DISABLED = new AnnouncementDispatchStore() {
         @Override
-        public boolean claimDispatch(String announcementId, String bucketKey, Instant dispatchAt) {
+        public boolean claimOnce(String announcementId, String scopeKey, Instant dispatchAt) {
+            return true;
+        }
+
+        @Override
+        public boolean claimCooldown(String announcementId, String scopeKey, Instant dispatchAt, long cooldownSeconds) {
             return true;
         }
 
@@ -18,7 +23,9 @@ public interface AnnouncementDispatchStore extends AutoCloseable {
         }
     };
 
-    boolean claimDispatch(String announcementId, String bucketKey, Instant dispatchAt);
+    boolean claimOnce(String announcementId, String scopeKey, Instant dispatchAt);
+
+    boolean claimCooldown(String announcementId, String scopeKey, Instant dispatchAt, long cooldownSeconds);
 
     void cleanup();
 

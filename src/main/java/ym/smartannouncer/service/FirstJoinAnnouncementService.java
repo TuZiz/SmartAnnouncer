@@ -20,6 +20,7 @@ public final class FirstJoinAnnouncementService {
     private final AnnouncementRegistry registry;
     private final MessageDispatcher dispatcher;
     private final DispatchDedupeService dedupeService;
+    private final OnlinePlayerTracker onlinePlayerTracker;
     private final Logger logger;
     private final Map<PendingFirstJoinKey, ScheduledFuture<?>> pendingTasks = new ConcurrentHashMap<>();
 
@@ -28,12 +29,14 @@ public final class FirstJoinAnnouncementService {
         AnnouncementRegistry registry,
         MessageDispatcher dispatcher,
         DispatchDedupeService dedupeService,
+        OnlinePlayerTracker onlinePlayerTracker,
         Logger logger
     ) {
         this.workerExecutor = workerExecutor;
         this.registry = registry;
         this.dispatcher = dispatcher;
         this.dedupeService = dedupeService;
+        this.onlinePlayerTracker = onlinePlayerTracker;
         this.logger = logger;
     }
 
@@ -53,7 +56,7 @@ public final class FirstJoinAnnouncementService {
             }
             PendingFirstJoinKey key = new PendingFirstJoinKey(playerId, announcement.id());
             ScheduledFuture<?> future = workerExecutor.schedule(
-                () -> trigger(player, announcement.id(), key),
+                () -> trigger(playerId, announcement.id(), key),
                 announcement.delaySeconds(),
                 TimeUnit.SECONDS
             );
@@ -71,9 +74,23 @@ public final class FirstJoinAnnouncementService {
         pendingTasks.clear();
     }
 
-    private void trigger(Player player, String announcementId, PendingFirstJoinKey key) {
+    public void handleQuit(UUID playerId) {
+        pendingTasks.entrySet().removeIf(entry -> {
+            if (!entry.getKey().playerId().equals(playerId)) {
+                return false;
+            }
+            entry.getValue().cancel(false);
+            return true;
+        });
+    }
+
+    private void trigger(UUID playerId, String announcementId, PendingFirstJoinKey key) {
         pendingTasks.remove(key);
         try {
+            Player player = onlinePlayerTracker.find(playerId).orElse(null);
+            if (player == null) {
+                return;
+            }
             registry.find(announcementId)
                 .filter(FirstJoinAnnouncement.class::isInstance)
                 .map(FirstJoinAnnouncement.class::cast)

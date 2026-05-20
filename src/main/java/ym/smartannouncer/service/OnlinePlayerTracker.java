@@ -8,6 +8,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -21,6 +22,10 @@ public final class OnlinePlayerTracker implements Listener {
 
     public Collection<Player> players() {
         return List.copyOf(onlinePlayers.values());
+    }
+
+    public Optional<Player> find(UUID playerId) {
+        return Optional.ofNullable(onlinePlayers.get(playerId));
     }
 
     @EventHandler

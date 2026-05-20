@@ -12,6 +12,10 @@ dependencies {
     compileOnly("org.spigotmc:spigot-api:${property("spigotApiVersion")}")
     implementation("com.mysql:mysql-connector-j:9.5.0")
     implementation("org.postgresql:postgresql:42.7.8")
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.spigotmc:spigot-api:${property("spigotApiVersion")}")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 java {
@@ -39,8 +43,13 @@ tasks.jar {
 
 tasks.shadowJar {
     archiveClassifier.set("")
+    mergeServiceFiles()
 }
 
 tasks.build {
     dependsOn(tasks.shadowJar)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

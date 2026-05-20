@@ -34,22 +34,30 @@ public final class DispatchDedupeService {
     }
 
     public boolean claim(AnnouncementDefinition announcement, Instant now) {
+        return claimCooldown(announcement, "scheduled", now, 0L);
+    }
+
+    public boolean claimCooldown(AnnouncementDefinition announcement, String scopeKey, Instant now, long cooldownSeconds) {
         StoreHolder holder = storeHolder.get();
         DatabaseSettings settings = holder.settings();
         if (!settings.enabled()) {
             return true;
         }
-        long bucket = Math.floorDiv(now.getEpochSecond(), settings.dispatchDedupeSeconds());
-        return holder.store().claimDispatch(announcement.id(), Long.toString(bucket), now);
+        long effectiveCooldownSeconds = cooldownSeconds > 0L ? cooldownSeconds : settings.dispatchDedupeSeconds();
+        return holder.store().claimCooldown(announcement.id(), scopeKey, now, Math.max(1L, effectiveCooldownSeconds));
+    }
+
+    public boolean claimOnce(AnnouncementDefinition announcement, String scopeKey, Instant now) {
+        StoreHolder holder = storeHolder.get();
+        DatabaseSettings settings = holder.settings();
+        if (!settings.enabled()) {
+            return true;
+        }
+        return holder.store().claimOnce(announcement.id(), scopeKey, now);
     }
 
     public boolean claimPlayerOnce(AnnouncementDefinition announcement, UUID playerId, Instant now) {
-        StoreHolder holder = storeHolder.get();
-        DatabaseSettings settings = holder.settings();
-        if (!settings.enabled()) {
-            return true;
-        }
-        return holder.store().claimDispatch(announcement.id(), "player:" + playerId, now);
+        return claimOnce(announcement, "player:" + playerId, now);
     }
 
     public void close() {

@@ -4,6 +4,39 @@ import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 
 public interface PlatformScheduler {
+    static PlatformScheduler disabled(PlatformCapabilities capabilities) {
+        return new PlatformScheduler() {
+            @Override
+            public PlatformCapabilities capabilities() {
+                return capabilities;
+            }
+
+            @Override
+            public TaskHandle runGlobal(Runnable task) {
+                return TaskHandle.NOOP;
+            }
+
+            @Override
+            public TaskHandle runRegion(Location location, Runnable task) {
+                return TaskHandle.NOOP;
+            }
+
+            @Override
+            public TaskHandle runEntity(Entity entity, Runnable task) {
+                return TaskHandle.NOOP;
+            }
+
+            @Override
+            public TaskHandle runAsync(Runnable task) {
+                return TaskHandle.NOOP;
+            }
+
+            @Override
+            public void cancelAll() {
+            }
+        };
+    }
+
     PlatformCapabilities capabilities();
 
     /*

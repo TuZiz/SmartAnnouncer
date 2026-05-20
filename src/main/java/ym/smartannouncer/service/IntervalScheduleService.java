@@ -10,6 +10,7 @@ import ym.smartannouncer.storage.DispatchDedupeService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public final class IntervalScheduleService {
     private final ScheduledExecutorService workerExecutor;
@@ -47,6 +49,10 @@ public final class IntervalScheduleService {
 
     public void reschedule(ConfigSnapshot snapshot) {
         cancelAll();
+        Set<String> activeIds = snapshot.intervalAnnouncements().stream()
+            .map(IntervalAnnouncement::id)
+            .collect(Collectors.toUnmodifiableSet());
+        sequenceIndexes.keySet().removeIf(id -> !activeIds.contains(id));
         for (IntervalAnnouncement announcement : snapshot.intervalAnnouncements()) {
             if (!announcement.enabled()) {
                 continue;
@@ -94,9 +100,9 @@ public final class IntervalScheduleService {
      * scheduling inside MessageDispatcher.
      */
     private void queueDispatch(IntervalAnnouncement announcement) {
-        AnnouncementMessage message = nextMessage(announcement);
         dispatchQueue.enqueue(() -> {
-            if (dedupeService.claim(announcement, Instant.now())) {
+            if (dedupeService.claimCooldown(announcement, "interval", Instant.now(), announcement.intervalSeconds())) {
+                AnnouncementMessage message = nextMessage(announcement);
                 dispatcher.dispatchToEligiblePlayers(announcement, List.of(message));
             }
         });

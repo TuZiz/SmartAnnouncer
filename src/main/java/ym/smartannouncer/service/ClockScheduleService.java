@@ -9,6 +9,8 @@ import ym.smartannouncer.util.TimeUtil;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -19,6 +21,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class ClockScheduleService {
+    private static final DateTimeFormatter CLOCK_SCOPE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
+
     private final ScheduledExecutorService workerExecutor;
     private final AnnouncementRegistry registry;
     private final TimedAnnouncementDispatchQueue dispatchQueue;
@@ -73,9 +77,11 @@ public final class ClockScheduleService {
                  * off the Bukkit thread. The send path later re-enters entity
                  * schedulers per recipient.
                  */
-                Duration delay = TimeUtil.delayUntilNext(announcement.times(), zoneId);
+                ZonedDateTime nextRun = TimeUtil.nextOccurrence(announcement.times(), zoneId);
+                Duration delay = Duration.between(ZonedDateTime.now(zoneId), nextRun);
+                String dispatchScope = "clock:" + CLOCK_SCOPE_FORMATTER.format(nextRun) + ':' + zoneId.getId();
                 ScheduledFuture<?> future = workerExecutor.schedule(
-                    () -> triggerAndReschedule(id, currentGeneration),
+                    () -> triggerAndReschedule(id, currentGeneration, dispatchScope),
                     Math.max(0L, delay.toMillis()),
                     TimeUnit.MILLISECONDS
                 );
@@ -84,7 +90,7 @@ public final class ClockScheduleService {
             });
     }
 
-    private void triggerAndReschedule(String id, long currentGeneration) {
+    private void triggerAndReschedule(String id, long currentGeneration, String dispatchScope) {
         try {
             if (currentGeneration != generation.get()) {
                 return;
@@ -96,7 +102,7 @@ public final class ClockScheduleService {
                 .filter(ClockAnnouncement::enabled)
                 .ifPresent(announcement -> {
                     dispatchQueue.enqueue(() -> {
-                        if (dedupeService.claim(announcement, Instant.now())) {
+                        if (dedupeService.claimOnce(announcement, dispatchScope, Instant.now())) {
                             dispatcher.dispatchToEligiblePlayers(announcement, announcement.messages());
                         }
                     });

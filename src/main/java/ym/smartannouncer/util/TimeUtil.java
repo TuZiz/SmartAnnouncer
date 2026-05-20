@@ -25,10 +25,18 @@ public final class TimeUtil {
     }
 
     public static Duration delayUntilNext(Collection<LocalTime> times, ZoneId zoneId) {
+        ZonedDateTime now = ZonedDateTime.now(zoneId);
+        return Duration.between(now, nextOccurrence(times, zoneId, now));
+    }
+
+    public static ZonedDateTime nextOccurrence(Collection<LocalTime> times, ZoneId zoneId) {
+        return nextOccurrence(times, zoneId, ZonedDateTime.now(zoneId));
+    }
+
+    public static ZonedDateTime nextOccurrence(Collection<LocalTime> times, ZoneId zoneId, ZonedDateTime now) {
         if (times.isEmpty()) {
             throw new IllegalArgumentException("times cannot be empty");
         }
-        ZonedDateTime now = ZonedDateTime.now(zoneId);
         ZonedDateTime nearest = null;
         for (LocalTime time : times) {
             ZonedDateTime candidate = now.toLocalDate().atTime(time).atZone(zoneId);
@@ -39,6 +47,6 @@ public final class TimeUtil {
                 nearest = candidate;
             }
         }
-        return Duration.between(now, nearest);
+        return nearest;
     }
 }

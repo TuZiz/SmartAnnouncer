@@ -18,29 +18,60 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
     private final DatabaseSettings settings;
     private final Logger logger;
     private final String dispatchTable;
+    private final String stateTable;
     private final AtomicBoolean initialized = new AtomicBoolean(false);
 
     public JdbcAnnouncementDispatchStore(DatabaseSettings settings, Logger logger) {
         this.settings = settings;
         this.logger = logger;
         this.dispatchTable = settings.tablePrefix() + "dispatch_log";
+        this.stateTable = settings.tablePrefix() + "dispatch_state";
     }
 
     @Override
-    public boolean claimDispatch(String announcementId, String bucketKey, Instant dispatchAt) {
+    public boolean claimOnce(String announcementId, String scopeKey, Instant dispatchAt) {
         try {
             ensureInitialized();
             try (Connection connection = openConnection();
-                 PreparedStatement statement = connection.prepareStatement(insertClaimSql())) {
+                 PreparedStatement statement = connection.prepareStatement(insertOnceSql())) {
                 statement.setString(1, announcementId);
-                statement.setString(2, bucketKey);
+                statement.setString(2, scopeKey);
                 statement.setString(3, settings.serverId());
                 statement.setLong(4, dispatchAt.getEpochSecond());
                 return statement.executeUpdate() > 0;
             }
         } catch (SQLException ex) {
-            logger.log(Level.WARNING, "Database dispatch claim failed; sending announcement locally as fallback: " + announcementId, ex);
-            return true;
+            logger.log(Level.WARNING, "Database dispatch claim failed; skipping announcement to avoid cross-server duplicates: "
+                + announcementId + " scope=" + scopeKey, ex);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean claimCooldown(String announcementId, String scopeKey, Instant dispatchAt, long cooldownSeconds) {
+        try {
+            ensureInitialized();
+            long dispatchEpochSecond = dispatchAt.getEpochSecond();
+            long cutoffEpochSecond = dispatchEpochSecond - Math.max(1L, cooldownSeconds);
+            try (Connection connection = openConnection();
+                 PreparedStatement statement = connection.prepareStatement(claimCooldownSql())) {
+                statement.setString(1, announcementId);
+                statement.setString(2, scopeKey);
+                statement.setString(3, settings.serverId());
+                statement.setLong(4, dispatchEpochSecond);
+                if (settings.type() == DatabaseType.POSTGRESQL) {
+                    statement.setLong(5, cutoffEpochSecond);
+                } else {
+                    statement.setLong(5, cutoffEpochSecond);
+                    statement.setLong(6, cutoffEpochSecond);
+                    statement.setLong(7, cutoffEpochSecond);
+                }
+                return statement.executeUpdate() > 0;
+            }
+        } catch (SQLException ex) {
+            logger.log(Level.WARNING, "Database dispatch cooldown claim failed; skipping announcement to avoid cross-server duplicates: "
+                + announcementId + " scope=" + scopeKey, ex);
+            return false;
         }
     }
 
@@ -51,6 +82,12 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
             long cutoff = Instant.now().minusSeconds(settings.cleanupDays() * 86400L).getEpochSecond();
             try (Connection connection = openConnection();
                  PreparedStatement statement = connection.prepareStatement("DELETE FROM " + dispatchTable + " WHERE dispatch_at < ?")) {
+                statement.setLong(1, cutoff);
+                statement.executeUpdate();
+            }
+            try (Connection connection = openConnection();
+                 PreparedStatement statement = connection.prepareStatement("DELETE FROM " + stateTable
+                     + " WHERE dispatch_at < ? AND scope_key NOT LIKE 'player:%'")) {
                 statement.setLong(1, cutoff);
                 statement.executeUpdate();
             }
@@ -72,14 +109,21 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
                 return;
             }
             try (Connection connection = openConnection(); Statement statement = connection.createStatement()) {
-                statement.execute(createTableSql());
+                statement.execute(createDispatchLogTableSql());
+                statement.execute(createStateTableSql());
+                int migratedClaims = statement.executeUpdate(migrateLegacyPlayerClaimsSql());
+                if (migratedClaims > 0) {
+                    logger.info("Migrated " + migratedClaims + " legacy player dispatch claims into " + stateTable + ".");
+                }
             }
             initialized.set(true);
-            logger.info("Database dispatch de-duplication is ready. table=" + dispatchTable + ", server-id=" + settings.serverId());
+            logger.info("Database dispatch de-duplication is ready. log-table=" + dispatchTable
+                + ", state-table=" + stateTable + ", server-id=" + settings.serverId());
         }
     }
 
     private Connection openConnection() throws SQLException {
+        loadDriver();
         Properties properties = new Properties();
         properties.setProperty("user", settings.username());
         properties.setProperty("password", settings.password());
@@ -90,6 +134,17 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
             properties.setProperty("allowPublicKeyRetrieval", "true");
         }
         return DriverManager.getConnection(jdbcUrl(), properties);
+    }
+
+    private void loadDriver() throws SQLException {
+        String driverClassName = settings.type() == DatabaseType.POSTGRESQL
+            ? "org.postgresql.Driver"
+            : "com.mysql.cj.jdbc.Driver";
+        try {
+            Class.forName(driverClassName, true, JdbcAnnouncementDispatchStore.class.getClassLoader());
+        } catch (ClassNotFoundException ex) {
+            throw new SQLException("JDBC driver class is missing from the plugin jar: " + driverClassName, ex);
+        }
     }
 
     private String jdbcUrl() {
@@ -103,7 +158,7 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
             + "?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
     }
 
-    private String createTableSql() {
+    private String createDispatchLogTableSql() {
         if (settings.type() == DatabaseType.POSTGRESQL) {
             return "CREATE TABLE IF NOT EXISTS " + dispatchTable + " ("
                 + "announcement_id VARCHAR(128) NOT NULL,"
@@ -124,12 +179,71 @@ public final class JdbcAnnouncementDispatchStore implements AnnouncementDispatch
             + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     }
 
-    private String insertClaimSql() {
+    private String createStateTableSql() {
         if (settings.type() == DatabaseType.POSTGRESQL) {
-            return "INSERT INTO " + dispatchTable
-                + " (announcement_id, bucket_key, server_id, dispatch_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING";
+            return "CREATE TABLE IF NOT EXISTS " + stateTable + " ("
+                + "announcement_id VARCHAR(128) NOT NULL,"
+                + "scope_key VARCHAR(128) NOT NULL,"
+                + "server_id VARCHAR(128) NOT NULL,"
+                + "dispatch_at BIGINT NOT NULL,"
+                + "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                + "PRIMARY KEY (announcement_id, scope_key)"
+                + ")";
         }
-        return "INSERT IGNORE INTO " + dispatchTable
-            + " (announcement_id, bucket_key, server_id, dispatch_at) VALUES (?, ?, ?, ?)";
+        return "CREATE TABLE IF NOT EXISTS " + stateTable + " ("
+            + "announcement_id VARCHAR(128) NOT NULL,"
+            + "scope_key VARCHAR(128) NOT NULL,"
+            + "server_id VARCHAR(128) NOT NULL,"
+            + "dispatch_at BIGINT NOT NULL,"
+            + "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            + "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            + "PRIMARY KEY (announcement_id, scope_key)"
+            + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    }
+
+    private String insertOnceSql() {
+        if (settings.type() == DatabaseType.POSTGRESQL) {
+            return "INSERT INTO " + stateTable
+                + " (announcement_id, scope_key, server_id, dispatch_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING";
+        }
+        return "INSERT IGNORE INTO " + stateTable
+            + " (announcement_id, scope_key, server_id, dispatch_at) VALUES (?, ?, ?, ?)";
+    }
+
+    private String claimCooldownSql() {
+        if (settings.type() == DatabaseType.POSTGRESQL) {
+            return "INSERT INTO " + stateTable
+                + " (announcement_id, scope_key, server_id, dispatch_at) VALUES (?, ?, ?, ?)"
+                + " ON CONFLICT (announcement_id, scope_key) DO UPDATE SET"
+                + " server_id = EXCLUDED.server_id,"
+                + " dispatch_at = EXCLUDED.dispatch_at,"
+                + " updated_at = CURRENT_TIMESTAMP"
+                + " WHERE " + stateTable + ".dispatch_at <= ?";
+        }
+        return "INSERT INTO " + stateTable
+            + " (announcement_id, scope_key, server_id, dispatch_at) VALUES (?, ?, ?, ?)"
+            + " ON DUPLICATE KEY UPDATE"
+            + " updated_at = IF(dispatch_at <= ?, CURRENT_TIMESTAMP, updated_at),"
+            + " server_id = IF(dispatch_at <= ?, VALUES(server_id), server_id),"
+            + " dispatch_at = IF(dispatch_at <= ?, VALUES(dispatch_at), dispatch_at)";
+    }
+
+    private String migrateLegacyPlayerClaimsSql() {
+        if (settings.type() == DatabaseType.POSTGRESQL) {
+            return "INSERT INTO " + stateTable
+                + " (announcement_id, scope_key, server_id, dispatch_at)"
+                + " SELECT announcement_id, bucket_key, MIN(server_id), MAX(dispatch_at)"
+                + " FROM " + dispatchTable
+                + " WHERE bucket_key LIKE 'player:%'"
+                + " GROUP BY announcement_id, bucket_key"
+                + " ON CONFLICT DO NOTHING";
+        }
+        return "INSERT IGNORE INTO " + stateTable
+            + " (announcement_id, scope_key, server_id, dispatch_at)"
+            + " SELECT announcement_id, bucket_key, MIN(server_id), MAX(dispatch_at)"
+            + " FROM " + dispatchTable
+            + " WHERE bucket_key LIKE 'player:%'"
+            + " GROUP BY announcement_id, bucket_key";
     }
 }

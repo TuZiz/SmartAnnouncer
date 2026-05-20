@@ -7,10 +7,13 @@ import ym.smartannouncer.dispatch.MessageDispatcher;
 import ym.smartannouncer.util.LocationPoint;
 import ym.smartannouncer.util.RegionUtil;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public final class LocationAnnouncementService {
     private final AnnouncementRegistry registry;
@@ -18,6 +21,7 @@ public final class LocationAnnouncementService {
     private final Logger logger;
     private final Map<UUID, Map<String, Boolean>> insideStates = new ConcurrentHashMap<>();
     private final Map<PlayerAnnouncementKey, Long> cooldownUntilMillis = new ConcurrentHashMap<>();
+    private final Map<String, List<LocationAnnouncement>> announcementsByWorld = new ConcurrentHashMap<>();
 
     public LocationAnnouncementService(AnnouncementRegistry registry, MessageDispatcher dispatcher, Logger logger) {
         this.registry = registry;
@@ -46,16 +50,27 @@ public final class LocationAnnouncementService {
         if (to == null || to.getWorld() == null) {
             return;
         }
+        List<LocationAnnouncement> worldAnnouncements = announcementsByWorld.get(to.getWorld().getName());
+        if (worldAnnouncements == null || worldAnnouncements.isEmpty()) {
+            return;
+        }
+        boolean debug = registry.snapshot().debug();
         UUID playerId = player.getUniqueId();
         Map<String, Boolean> playerStates = insideStates.computeIfAbsent(playerId, ignored -> new ConcurrentHashMap<>());
         LocationPoint toPoint = LocationPoint.from(to);
         LocationPoint fromPoint = from != null && from.getWorld() != null ? LocationPoint.from(from) : null;
+        int toBlockX = to.getBlockX();
+        int toBlockY = to.getBlockY();
+        int toBlockZ = to.getBlockZ();
 
-        for (LocationAnnouncement announcement : registry.snapshot().locationAnnouncements()) {
+        for (LocationAnnouncement announcement : worldAnnouncements) {
             if (!announcement.enabled()) {
                 continue;
             }
             boolean wasInside = playerStates.getOrDefault(announcement.id(), false);
+            if (!wasInside && !announcement.shape().intersectsBlock(toBlockX, toBlockY, toBlockZ)) {
+                continue;
+            }
             boolean isInside = RegionUtil.contains(announcement.shape(), toPoint);
             if (wasInside == isInside) {
                 continue;
@@ -72,10 +87,23 @@ public final class LocationAnnouncementService {
             Location triggerLocation = entering || fromPoint == null ? to : from;
             LocationPoint triggerPoint = entering || fromPoint == null ? toPoint : fromPoint;
             dispatcher.dispatchLocation(announcement, player, triggerLocation, triggerPoint, announcement.messages());
-            if (registry.snapshot().debug()) {
+            if (debug) {
                 logger.info("Location announcement fired: " + announcement.id() + " player=" + player.getName());
             }
         }
+    }
+
+    public void rebuildIndex() {
+        Map<String, List<LocationAnnouncement>> rebuilt = registry.snapshot().locationAnnouncements().stream()
+            .filter(LocationAnnouncement::enabled)
+            .collect(Collectors.groupingBy(announcement -> announcement.shape().worldName()));
+        announcementsByWorld.clear();
+        announcementsByWorld.putAll(rebuilt);
+    }
+
+    public void handleQuit(UUID playerId) {
+        insideStates.remove(playerId);
+        cooldownUntilMillis.keySet().removeIf(key -> key.playerId().equals(playerId));
     }
 
     public void resetRuntimeState() {
@@ -90,12 +118,17 @@ public final class LocationAnnouncementService {
         }
         long now = System.currentTimeMillis();
         PlayerAnnouncementKey key = new PlayerAnnouncementKey(playerId, announcement.id());
-        Long currentUntil = cooldownUntilMillis.get(key);
-        if (currentUntil != null && currentUntil > now) {
-            return false;
-        }
-        cooldownUntilMillis.put(key, now + cooldownMillis);
-        return true;
+        long nextUntil = now + cooldownMillis;
+        boolean[] acquired = new boolean[1];
+        cooldownUntilMillis.compute(key, (ignored, currentUntil) -> {
+            if (currentUntil != null && currentUntil > now) {
+                acquired[0] = false;
+                return currentUntil;
+            }
+            acquired[0] = true;
+            return nextUntil;
+        });
+        return acquired[0];
     }
 
     private record PlayerAnnouncementKey(UUID playerId, String announcementId) {
