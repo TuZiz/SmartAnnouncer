@@ -1,0 +1,27 @@
+name: SmartAnnouncer
+version: '${version}'
+main: ym.smartannouncer.SmartAnnouncerPlugin
+api-version: '1.20'
+folia-supported: true
+authors: [ ymxc ]
+description: Thread-safe interval, clock and location announcement plugin for Spigot, Paper and Folia.
+
+commands:
+  smartannouncer:
+    description: SmartAnnouncer administration command.
+    usage: /smartannouncer <reload|test|list>
+    aliases: [sa]
+
+permissions:
+  smartannouncer.admin:
+    description: Grants all SmartAnnouncer administration permissions.
+    default: op
+    children:
+      smartannouncer.reload: true
+      smartannouncer.test: true
+  smartannouncer.reload:
+    description: Allows /smartannouncer reload.
+    default: op
+  smartannouncer.test:
+    description: Allows /smartannouncer test.
+    default: op

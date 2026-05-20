@@ -1,0 +1,15 @@
+package ym.smartannouncer.config.model;
+
+public interface RegionShape {
+    RegionKind kind();
+
+    String worldName();
+
+    boolean contains(String worldName, double x, double y, double z);
+
+    double centerX();
+
+    double centerY();
+
+    double centerZ();
+}

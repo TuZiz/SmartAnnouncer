@@ -1,0 +1,20 @@
+settings:
+  timezone: "Asia/Shanghai"
+  prefix: ""
+  debug: false
+
+# 数据库去重：多服共用同一个数据库时，interval / clock 公告只会由抢占成功的一个子服发送。
+# 关闭时保持原本单服行为；开启后请为每个子服设置不同 server-id，并让所有子服连接同一个库。
+database:
+  enabled: false
+  type: "mysql" # mysql 或 postgresql
+  jdbc-url: "" # 可选；填写后优先使用，例如 jdbc:mysql://127.0.0.1:3306/smartannouncer
+  host: "localhost"
+  port: 3306
+  database: "smartannouncer"
+  username: "root"
+  password: ""
+  table-prefix: "smartannouncer_"
+  server-id: "server-1"
+  dispatch-dedupe-seconds: 60
+  cleanup-days: 14

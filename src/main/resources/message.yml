@@ -1,0 +1,19 @@
+settings:
+  system-prefix: "<#00BFFF>&l[SmartAnnouncer] &f"
+
+command:
+  usage: "&7💡 &f可用命令: <#FFD700>/{label} reload &8| <#FFD700>/{label} test <id> &8| <#FFD700>/{label} list"
+  no-permission: "<#FF4C4C>❌ &f权限不足，你无法执行此命令。"
+  reload-start: "<#F39C12>⏳ &f正在异步重载配置文件，请稍候..."
+  test-usage: "<#FF4C4C>⚠️ &f格式错误！&7正确用法: <#FFD700>/{label} test <id>"
+  test-not-found: "<#FF4C4C>❌ &f测试失败，找不到 ID 为 &c{id} &f的公告。"
+  list-header: "<#00FA9A>📋 &f当前加载的公告总数: <#FFD700>&l{count}"
+  list-entry: "  <#87CEFA>▪ &fID: <#FFD700>{id} &8[&7类型: {type}, 状态: {enabled}&8]"
+  unknown-subcommand: "<#FF4C4C>❓ &f未知子命令，请检查输入是否拼写正确。"
+
+service:
+  reload-success: "<#00FF7F>✔️ &f公告配置与消息已成功异步重载！"
+  reload-failed: "<#FF4C4C>❌ &f重载失败！&7旧配置仍在维持运行，请前往后台控制台查看具体报错日志。"
+
+preview:
+  no-messages: "<#FF4C4C>⚠️ &f无法预览，该公告尚未配置任何消息内容。"

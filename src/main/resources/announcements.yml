@@ -1,0 +1,106 @@
+announcements:
+  # ---------------------------------------------------------
+  # 1. 首次进服欢迎：只对第一次加入服务器的玩家发送
+  # ---------------------------------------------------------
+  - id: "new_player_welcome"
+    type: "first_join"
+    enabled: true
+    delay-seconds: 3
+    messages:
+      - text: |-
+          &r
+          <#FFD700>❤ &l新人指南 &f| <#FFF8DC>Welcome
+          <#F39C12>▸ &f重要物品请放入领地，务必使用牌子锁保护箱子。
+          <#F39C12>▸ &f保持在线 &e30 分钟 &f即可免费获取第一块领地！
+          <#F39C12>▸ &7操作提示：手持木牌右键箱子即可快速上锁。
+          &r
+        hover:
+          - "<#FFD700>✔ 保护财产小贴士 ✔"
+          - "&7请务必锁箱或圈地，避免物品丢失。"
+          - "&7第一块领地需在线满 30 分钟后自动获取。"
+    worlds: []
+    permission: ""
+
+  # ---------------------------------------------------------
+  # 2. 官方 QQ 群推广
+  # ---------------------------------------------------------
+  - id: "qq_group_promo"
+    type: "interval"
+    enabled: true
+    interval-seconds: 1800
+    order: "SEQUENTIAL"
+    messages:
+      - text: "<#00BFFF>❤ 社区 &8| &f官方 QQ 群：&b悠梦星辰 | Minecraft26.1 &8- <#00FA9A>&n[点击一键加入]&r"
+        click:
+          action: "OPEN_URL"
+          value: "https://qm.qq.com/q/U5Sq3AGvmw"
+        hover:
+          - "<#00BFFF>✔ 点击立即跳转至 QQ ✔"
+          - "&7欢迎来群里聊天、反馈和找队友。"
+    worlds: []
+    permission: ""
+
+  # ---------------------------------------------------------
+  # 3. 随机游戏小贴士
+  # ---------------------------------------------------------
+  - id: "random_tips"
+    type: "interval"
+    enabled: true
+    interval-seconds: 300
+    order: "RANDOM"
+    messages:
+      - text: "<#3498DB>❤ 探索 &8| &f想去未知的新区域看看？<#85C1E9>&n[点击填入 /rtp]&r"
+        click:
+          action: "SUGGEST_COMMAND"
+          value: "/rtp"
+        hover:
+          - "<#3498DB>✔ 随机传送 ✔"
+          - "&7点击填入 /rtp，确认后即可开始传送。"
+
+      - text: "<#E67E22>❤ 保护 &8| &f重要物品请锁箱，手持 &e木牌 &f右键箱子即可上锁。"
+        hover:
+          - "<#E67E22>✔ 锁箱提示 ✔"
+          - "&7默认右键贴箱子即可锁定。"
+          - "&7公共箱或共享箱请按服务器规则设置。"
+
+      - text: "<#2ECC71>❤ 领地 &8| &f长期建筑请及时圈地保护。<#82E0AA>&n[点击查看圈地帮助]&r"
+        click:
+          action: "SUGGEST_COMMAND"
+          value: "/claim help"
+        hover:
+          - "<#2ECC71>✔ 圈地指令 ✔"
+          - "&7点击填入圈地帮助命令。"
+
+      - text: "<#E74C3C>❤ 交易 &8| &f交易前请仔细核对物品、数量和金额，谨防被骗。"
+        hover:
+          - "<#E74C3C>⚠ 游戏交易需谨慎，保护好自己的财产。"
+
+      - text: "<#9B59B6>❤ 面交 &8| &f按住 &eShift &f右键玩家，可开启安全的面对面交易。"
+        hover:
+          - "<#9B59B6>✔ 面对面交易 ✔"
+          - "&7适合当面交换物品。"
+          - "&7交易前请再次确认物品、数量和金额。"
+    worlds: []
+    permission: ""
+
+  # ---------------------------------------------------------
+  # 4. 现实时间作息提醒
+  # ---------------------------------------------------------
+  - id: "health_reminder"
+    type: "clock"
+    enabled: true
+    times:
+      - "21:30"
+      - "23:00"
+      - "00:00"
+      - "02:00"
+    messages:
+      - text: "<#9370DB>❤ 提醒 &8| &f夜深了，修仙伤身早点休息。<#DDA0DD>&n[点击回主城挂机]&r"
+        click:
+          action: "RUN_COMMAND"
+          value: "/spawn"
+        hover:
+          - "<#DDA0DD>✔ 早睡早起身体好 ✔"
+          - "&7点击立刻传回主城安全区。"
+    worlds: []
+    permission: ""
